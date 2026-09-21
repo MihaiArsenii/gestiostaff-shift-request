@@ -83,9 +83,23 @@ export default async function handler(req, res) {
       '<td style="padding:7px 0;text-align:right">' + money(l.total) + '</td>' +
     '</tr>').join('');
 
-  const totalRow =
-    '<tr><td colspan="2" style="padding:10px 0 0;border-top:1px solid #e3e6eb;font-weight:bold">Total, excluding VAT</td>' +
-    '<td style="padding:10px 0 0;text-align:right;border-top:1px solid #e3e6eb;font-weight:bold">' + money(d.total) + '</td></tr>';
+  // Totals. The client may have switched VAT on before sending, in which case
+  // the email has to show the same figures they saw on the page.
+  const vatOn = !!d.vatApplied && Number(d.vat) > 0;
+  const subtotal = Number(d.subtotal || d.total);
+
+  const totalsBlock = span =>
+    (vatOn
+      ? '<tr><td colspan="' + span + '" style="padding:10px 0 0;border-top:1px solid #e3e6eb">Subtotal</td>' +
+        '<td style="padding:10px 0 0;text-align:right;border-top:1px solid #e3e6eb">' + money(subtotal) + '</td></tr>' +
+        '<tr><td colspan="' + span + '" style="padding:6px 0">VAT at ' + Number(d.vatPct || 20) + '%</td>' +
+        '<td style="padding:6px 0;text-align:right">' + money(d.vat) + '</td></tr>' +
+        '<tr><td colspan="' + span + '" style="padding:6px 0;font-weight:bold">Total, including VAT</td>' +
+        '<td style="padding:6px 0;text-align:right;font-weight:bold">' + money(d.total) + '</td></tr>'
+      : '<tr><td colspan="' + span + '" style="padding:10px 0 0;border-top:1px solid #e3e6eb;font-weight:bold">Total, excluding VAT</td>' +
+        '<td style="padding:10px 0 0;text-align:right;border-top:1px solid #e3e6eb;font-weight:bold">' + money(d.total) + '</td></tr>');
+
+  const totalRow = totalsBlock(2);
 
   const wrap = inner =>
     '<div style="font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#1a1d21;max-width:560px">' +
@@ -139,8 +153,7 @@ export default async function handler(req, res) {
         '<td style="padding:7px 0;text-align:right">Line total</td>' +
       '</tr>' +
       internalLines +
-      '<tr><td colspan="3" style="padding:10px 0 0;border-top:1px solid #e3e6eb;font-weight:bold">Total, excluding VAT</td>' +
-      '<td style="padding:10px 0 0;text-align:right;border-top:1px solid #e3e6eb;font-weight:bold">' + money(d.total) + '</td></tr>' +
+      totalsBlock(3) +
     '</table>' +
     '<p style="font-size:13px;color:#6b7585;margin-top:20px">Reply to this email to reach ' + esc(d.contact) + ' directly.</p>'
   );
