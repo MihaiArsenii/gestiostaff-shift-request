@@ -16,7 +16,8 @@
 // No dependencies — fetch is built into the Vercel Node runtime.
 
 const ALLOWED_ORIGINS = [
-  'https://www.gestiostaff.com',
+  'https://mihaiarsenii.github.io',   // where the page is actually served from
+  'https://www.gestiostaff.com',      // in case the page ever moves onto the domain
   'https://gestiostaff.com'
 ];
 
