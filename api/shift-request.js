@@ -37,13 +37,26 @@ export default async function handler(req, res) {
 
   const d = req.body || {};
 
+  // A request can cover several days. Older pages send one day at the top level.
+  const shifts = Array.isArray(d.shifts) ? d.shifts : [{
+    date: d.date, start: d.start, finish: d.finish, breakMinutes: d.breakMinutes,
+    hoursPerPerson: d.hoursPerPerson, chargeableHours: d.chargeableHours,
+    staffCount: d.staffCount, lines: d.lines, subtotal: d.subtotal
+  }];
+
   // --- Validation: never trust the browser ---
   const bad = [];
   if (!d.company || String(d.company).length > 200) bad.push('company');
   if (!d.contact || String(d.contact).length > 200) bad.push('contact');
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(d.email || ''))) bad.push('email');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d.date || ''))) bad.push('date');
-  if (!Array.isArray(d.lines) || !d.lines.length || d.lines.length > 20) bad.push('lines');
+  if (!shifts.length || shifts.length > 14) bad.push('shifts');
+  shifts.forEach((s, i) => {
+    if (!s || typeof s !== 'object') { bad.push('shift ' + (i + 1)); return; }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(s.date || ''))) bad.push('date ' + (i + 1));
+    if (!/^\d{2}:\d{2}$/.test(String(s.start || '')) || !/^\d{2}:\d{2}$/.test(String(s.finish || ''))) bad.push('times ' + (i + 1));
+    if (!Array.isArray(s.lines) || !s.lines.length || s.lines.length > 20) bad.push('lines ' + (i + 1));
+    else if (s.lines.some(l => !l || !l.role || String(l.role).length > 60 || !(Number(l.qty) >= 1))) bad.push('lines ' + (i + 1));
+  });
   if (!(Number(d.total) > 0)) bad.push('total');
   if (bad.length) return res.status(400).json({ error: 'Invalid request', fields: bad });
 
@@ -53,32 +66,63 @@ export default async function handler(req, res) {
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const hrs = n => (Math.round(Number(n) * 100) / 100).toString();
 
-  const prettyDate = new Date(d.date + 'T00:00:00').toLocaleDateString('en-GB', {
+  const longDate = iso => new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
   });
+  const shortDate = iso => new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', {
+    weekday: 'short', day: 'numeric', month: 'short'
+  });
 
-  const worked = Number(d.hoursPerPerson || 0);
-  const chargeable = Number(d.chargeableHours || worked);
-  const overnight = d.finish <= d.start ? ' (finishing the next day)' : '';
-  const times = d.start + ' – ' + d.finish + overnight +
-    (d.breakMinutes ? ', with a ' + d.breakMinutes + '-minute unpaid break' : ', no break');
+  const multi = shifts.length > 1;
+  const sorted = shifts.map(s => s.date).sort();
+  const prettyDate = longDate(shifts[0].date);
+  const dateSpan = multi
+    ? shifts.length + ' days, ' + shortDate(sorted[0]) + ' – ' + shortDate(sorted[sorted.length - 1]) +
+      ' ' + sorted[sorted.length - 1].slice(0, 4)
+    : prettyDate;
+  const staffShifts = shifts.reduce((a, s) => a + (Number(s.staffCount) || 0), 0);
 
   const row = (label, value) =>
     '<tr><td style="padding:7px 0;color:#6b7585;width:40%">' + label + '</td>' +
     '<td style="padding:7px 0;color:#1a1d21">' + value + '</td></tr>';
 
-  const detailsTable =
-    '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:18px 0">' +
-      row('Date', esc(prettyDate)) +
+  const dayDetails = s => {
+    const worked = Number(s.hoursPerPerson || 0);
+    const chargeable = Number(s.chargeableHours || worked);
+    const overnight = s.finish <= s.start ? ' (finishing the next day)' : '';
+    const times = 'Start shift ' + s.start + ', finish shift ' + s.finish + overnight +
+      (Number(s.breakMinutes) ? ', with a ' + Number(s.breakMinutes) + '-minute unpaid break' : ', no break');
+    return '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:12px 0">' +
+      row('Date', esc(longDate(s.date))) +
       row('Times', esc(times)) +
       row('Hours per person', hrs(chargeable) + ' chargeable' +
         (chargeable > worked ? ' (' + hrs(worked) + ' worked, minimum charge applied)' : '')) +
-      row('Staff', Number(d.staffCount) + ' in total') +
+      row('Staff', Number(s.staffCount) + ' in total') +
     '</table>';
+  };
 
-  const clientLines = d.lines.map(l =>
+  const dayHeading = (s, i) => multi
+    ? '<p style="font-weight:bold;font-size:16px;margin:26px 0 0;padding-top:14px;border-top:1px solid #e3e6eb">Day ' +
+      (i + 1) + ' — ' + esc(shortDate(s.date)) + '</p>'
+    : '';
+
+  const daySubtotal = (s, span) => multi
+    ? '<tr><td colspan="' + span + '" style="padding:8px 0 0;color:#6b7585">Day subtotal</td>' +
+      '<td style="padding:8px 0 0;text-align:right;color:#6b7585">' +
+      money(Number(s.subtotal) || s.lines.reduce((a, l) => a + Number(l.total || 0), 0)) + '</td></tr>'
+    : '';
+
+  const clientLineRows = s => s.lines.map(l =>
     '<tr>' +
       '<td style="padding:7px 0">' + esc(l.role) + ' &times; ' + Number(l.qty) + '</td>' +
+      '<td style="padding:7px 0;text-align:right">' + money(l.rate) + '/hr</td>' +
+      '<td style="padding:7px 0;text-align:right">' + money(l.total) + '</td>' +
+    '</tr>').join('');
+
+  const internalLineRows = s => s.lines.map(l =>
+    '<tr>' +
+      '<td style="padding:7px 0">' + esc(l.role) + ' &times; ' + Number(l.qty) + '</td>' +
+      '<td style="padding:7px 0;text-align:right">' + money(l.pay) + '/hr</td>' +
       '<td style="padding:7px 0;text-align:right">' + money(l.rate) + '/hr</td>' +
       '<td style="padding:7px 0;text-align:right">' + money(l.total) + '</td>' +
     '</tr>').join('');
@@ -99,19 +143,25 @@ export default async function handler(req, res) {
       : '<tr><td colspan="' + span + '" style="padding:10px 0 0;border-top:1px solid #e3e6eb;font-weight:bold">Total, excluding VAT</td>' +
         '<td style="padding:10px 0 0;text-align:right;border-top:1px solid #e3e6eb;font-weight:bold">' + money(d.total) + '</td></tr>');
 
-  const totalRow = totalsBlock(2);
-
   const wrap = inner =>
     '<div style="font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#1a1d21;max-width:560px">' +
     inner + '</div>';
 
   // --- The client's copy ---
+  const clientDays = shifts.map((s, i) =>
+    dayHeading(s, i) +
+    dayDetails(s) +
+    '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:0 0 6px">' +
+      clientLineRows(s) + daySubtotal(s, 2) +
+    '</table>').join('');
+
   const clientHtml = wrap(
     '<p>Hi ' + esc(d.contact) + ',</p>' +
-    '<p>Thank you — we have your staffing request for ' + esc(d.company) + '. Here is what you have asked for:</p>' +
-    detailsTable +
+    '<p>Thank you — we have your staffing request for ' + esc(d.company) +
+    (multi ? ' covering ' + shifts.length + ' days' : '') + '. Here is what you have asked for:</p>' +
+    clientDays +
     '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:18px 0">' +
-      clientLines + totalRow +
+      totalsBlock(2) +
     '</table>' +
     '<p>Someone from GestioStaff will confirm your staff as soon as possible. If anything above is wrong, ' +
     'or you would like to change it, just reply to this email and we will pick it up from here.</p>' +
@@ -122,37 +172,37 @@ export default async function handler(req, res) {
   );
 
   // --- Your copy ---
-  const internalLines = d.lines.map(l =>
-    '<tr>' +
-      '<td style="padding:7px 0">' + esc(l.role) + ' &times; ' + Number(l.qty) + '</td>' +
-      '<td style="padding:7px 0;text-align:right">' + money(l.pay) + '/hr</td>' +
-      '<td style="padding:7px 0;text-align:right">' + money(l.rate) + '/hr</td>' +
-      '<td style="padding:7px 0;text-align:right">' + money(l.total) + '</td>' +
-    '</tr>').join('');
-
   const nmwFlag = d.belowNMW
     ? '<p style="padding:10px 14px;background:#fdeaea;border-radius:6px;color:#a32020;font-size:14px">' +
       'One or more pay rates are below the National Living Wage. Check before confirming.</p>'
     : '';
 
+  const internalHead =
+    '<tr style="color:#6b7585;font-size:13px">' +
+      '<td style="padding:7px 0">Role</td>' +
+      '<td style="padding:7px 0;text-align:right">Pay rate</td>' +
+      '<td style="padding:7px 0;text-align:right">Charge rate</td>' +
+      '<td style="padding:7px 0;text-align:right">Line total</td>' +
+    '</tr>';
+
+  const internalDays = shifts.map((s, i) =>
+    dayHeading(s, i) +
+    dayDetails(s) +
+    '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:0 0 6px">' +
+      internalHead + internalLineRows(s) + daySubtotal(s, 3) +
+    '</table>').join('');
+
   const internalHtml = wrap(
-    '<p style="font-weight:bold;font-size:17px;margin-bottom:2px">New shift request — ' + esc(d.company) + '</p>' +
+    '<p style="font-weight:bold;font-size:17px;margin-bottom:2px">New shift request — ' + esc(d.company) +
+    (multi ? ' (' + shifts.length + ' days)' : '') + '</p>' +
     nmwFlag +
     '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:18px 0">' +
       row('Company', esc(d.company)) +
       row('Contact', esc(d.contact)) +
       row('Email', '<a href="mailto:' + esc(d.email) + '">' + esc(d.email) + '</a>') +
     '</table>' +
-    detailsTable +
-    '<p style="font-weight:bold;margin:24px 0 6px">Staff requested</p>' +
-    '<table style="width:100%;border-collapse:collapse;font-size:15px">' +
-      '<tr style="color:#6b7585;font-size:13px">' +
-        '<td style="padding:7px 0">Role</td>' +
-        '<td style="padding:7px 0;text-align:right">Pay rate</td>' +
-        '<td style="padding:7px 0;text-align:right">Charge rate</td>' +
-        '<td style="padding:7px 0;text-align:right">Line total</td>' +
-      '</tr>' +
-      internalLines +
+    internalDays +
+    '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:18px 0">' +
       totalsBlock(3) +
     '</table>' +
     '<p style="font-size:13px;color:#6b7585;margin-top:20px">Reply to this email to reach ' + esc(d.contact) + ' directly.</p>'
@@ -174,14 +224,15 @@ export default async function handler(req, res) {
         from: process.env.FROM_EMAIL,
         to: [d.email],
         reply_to: process.env.INTERNAL_EMAIL,
-        subject: 'Your staff request for ' + prettyDate,
+        subject: 'Your staff request for ' + dateSpan,
         html: clientHtml
       }),
       send({
         from: process.env.FROM_EMAIL,
         to: [process.env.INTERNAL_EMAIL],
         reply_to: d.email,
-        subject: 'Shift request — ' + d.company + ', ' + prettyDate + ' (' + d.staffCount + ' staff)',
+        subject: 'Shift request — ' + d.company + ', ' + dateSpan +
+          (multi ? ' (' + staffShifts + ' staff shifts)' : ' (' + staffShifts + ' staff)'),
         html: internalHtml
       })
     ]);
