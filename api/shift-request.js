@@ -119,10 +119,14 @@ export default async function handler(req, res) {
       '<td style="padding:7px 0;text-align:right">' + money(l.total) + '</td>' +
     '</tr>').join('');
 
+  // What the staff member gets per hour, holiday pay included. Newer pages send it;
+  // older ones only sent the basic pay rate.
+  const staffRate = l => Number(l.staff) > 0 ? Number(l.staff) : Number(l.pay || 0) * 1.1207;
+
   const internalLineRows = s => s.lines.map(l =>
     '<tr>' +
       '<td style="padding:7px 0">' + esc(l.role) + ' &times; ' + Number(l.qty) + '</td>' +
-      '<td style="padding:7px 0;text-align:right">' + money(l.pay) + '/hr</td>' +
+      '<td style="padding:7px 0;text-align:right">' + money(staffRate(l)) + '/hr</td>' +
       '<td style="padding:7px 0;text-align:right">' + money(l.rate) + '/hr</td>' +
       '<td style="padding:7px 0;text-align:right">' + money(l.total) + '</td>' +
     '</tr>').join('');
@@ -180,8 +184,8 @@ export default async function handler(req, res) {
   const internalHead =
     '<tr style="color:#6b7585;font-size:13px">' +
       '<td style="padding:7px 0">Role</td>' +
-      '<td style="padding:7px 0;text-align:right">Pay rate</td>' +
-      '<td style="padding:7px 0;text-align:right">Charge rate</td>' +
+      '<td style="padding:7px 0;text-align:right">Staff get (incl. holiday)</td>' +
+      '<td style="padding:7px 0;text-align:right">Client rate</td>' +
       '<td style="padding:7px 0;text-align:right">Line total</td>' +
     '</tr>';
 
