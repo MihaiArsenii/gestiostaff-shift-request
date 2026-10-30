@@ -189,17 +189,27 @@ export default async function handler(req, res) {
       '<td style="padding:7px 0;text-align:right">Line total</td>' +
     '</tr>';
 
+  // Links to open each day on the New booking page (when the request page saved it)
+  const requestIds = Array.isArray(d.requestIds) && d.requestIds.length === shifts.length &&
+    d.requestIds.every(id => /^rec[A-Za-z0-9]{14}$/.test(String(id))) ? d.requestIds.map(String) : null;
+  const openUrl = i => 'https://crew.gestiostaff.com/new-booking?request=' + requestIds[i];
+  const openButton = (i, label) => requestIds
+    ? '<p style="margin:14px 0 4px"><a href="' + openUrl(i) + '" style="display:inline-block;background:#0c0d10;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 18px;border-radius:10px">' + label + '</a></p>'
+    : '';
+
   const internalDays = shifts.map((s, i) =>
     dayHeading(s, i) +
     dayDetails(s) +
     '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:0 0 6px">' +
       internalHead + internalLineRows(s) + daySubtotal(s, 3) +
-    '</table>').join('');
+    '</table>' +
+    (multi ? openButton(i, 'Open day ' + (i + 1) + ' in New booking →') : '')).join('');
 
   const internalHtml = wrap(
     '<p style="font-weight:bold;font-size:17px;margin-bottom:2px">New shift request — ' + esc(d.company) +
     (multi ? ' (' + shifts.length + ' days)' : '') + '</p>' +
     nmwFlag +
+    (multi ? '' : openButton(0, 'Open in New booking →')) +
     '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:18px 0">' +
       row('Company', esc(d.company)) +
       row('Contact', esc(d.contact)) +
@@ -209,6 +219,7 @@ export default async function handler(req, res) {
     '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:18px 0">' +
       totalsBlock(3) +
     '</table>' +
+    (requestIds ? '<p style="font-size:13px;color:#6b7585;margin-top:20px">The button opens crew.gestiostaff.com/new-booking with this request filled in. Add the venue, uniform and duties, then create the booking. It\'s also listed there under Client requests waiting.</p>' : '') +
     '<p style="font-size:13px;color:#6b7585;margin-top:20px">Reply to this email to reach ' + esc(d.contact) + ' directly.</p>'
   );
 
