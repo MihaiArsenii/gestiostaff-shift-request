@@ -257,12 +257,21 @@ export default async function handler(req, res) {
     '</td></tr>' +
     card('LOCATION', clientLocation) +
     shifts.map(clientDay).join('') +
-    (notes ? card('YOUR NOTES', '<p style="margin:0;font-size:15px;line-height:1.55">' + notesHtml + '</p>') : '') +
     totalBox +
+    (notes ? card('YOUR NOTES', '<p style="margin:0;font-size:15px;line-height:1.55">' + notesHtml + '</p>') : '') +
     card('WHAT HAPPENS NEXT',
       step(1, 'We&#39;ll confirm your staff by email as soon as possible. Nothing is booked until then.') +
       step(2, 'Before the event, we&#39;ll send you the crew list with names and photos.') +
       step(3, 'Need to change something? Just reply to this email.')) +
+    // need more staff
+    '<tr><td style="padding:12px 18px 6px;' + FONT + 'color:' + C.ink + '">' +
+    '<p style="margin:0 0 2px;font-size:16px;font-weight:bold">Need more staff?</p>' +
+    '<p style="margin:0;font-size:14px;line-height:1.55;color:' + C.muted + '">Send another request any time.</p>' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:12px 0 4px"><tr>' +
+    '<td style="background:' + C.gold + ';border-radius:10px">' +
+    '<a href="https://www.gestiostaff.com/request-staff" style="display:inline-block;padding:14px 26px;' + FONT +
+    'font-size:16px;font-weight:bold;color:' + C.dark + ';text-decoration:none">Request staff &rarr;</a></td></tr></table>' +
+    '</td></tr>' +
     // phone
     '<tr><td style="padding:12px 18px 6px">' +
     '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f8;border-radius:12px"><tr>' +
