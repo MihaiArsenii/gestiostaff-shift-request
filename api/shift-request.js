@@ -79,7 +79,7 @@ export default async function handler(req, res) {
 
   const longDate = iso => new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
-  });
+  }).replace(',', '');   // "Friday 6 November 2026
   const shortDate = iso => new Date(iso + 'T00:00:00').toLocaleDateString('en-GB', {
     weekday: 'short', day: 'numeric', month: 'short'
   });
@@ -172,31 +172,116 @@ export default async function handler(req, res) {
     '<div style="font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#1a1d21;max-width:560px">' +
     inner + '</div>';
 
-  // --- The client's copy ---
-  const clientDays = shifts.map((s, i) =>
-    dayHeading(s, i) +
-    dayDetails(s) +
-    '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:0 0 6px">' +
-      clientLineRows(s) + daySubtotal(s, 2) +
-    '</table>').join('');
+  // --- The client's copy: branded, in the same style as the GestioStaff worker emails ---
+  const C = { ink: '#14161a', muted: '#5d646e', line: '#e4e6ea', gold: '#f8d861', dark: '#0c0d10', goldTxt: '#9a7b00' };
+  const FONT = 'font-family:Helvetica,Arial,sans-serif;';
+  const PHONE = '+44 7831 979890', TEL = 'tel:+447831979890';
+  const dateLong = iso => longDate(iso).replace(',', '');
+  const firstName = String(d.contact).trim().split(/\s+/)[0] || 'there';
 
-  const clientHtml = wrap(
-    '<p>Hi ' + esc(d.contact) + ',</p>' +
-    '<p>Thank you — we have your staffing request for ' + esc(d.company) +
-    (multi ? ' covering ' + shifts.length + ' days' : '') + '. Here is what you have asked for:</p>' +
-    '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:12px 0">' + row('Location', locationHtml) +
-      (notes ? row('Your notes', notesHtml) : '') + '</table>' +
-    clientDays +
-    '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:18px 0">' +
-      totalsBlock(2) +
-    '</table>' +
-    '<p>Someone from GestioStaff will confirm your staff as soon as possible. If anything above is wrong, ' +
-    'or you would like to change it, just reply to this email and we will pick it up from here.</p>' +
-    '<p>Best wishes,<br>GestioStaff</p>' +
-    '<p style="font-size:13px;color:#6b7585;border-top:1px solid #eceef2;padding-top:14px;margin-top:22px">' +
-    'Client rates include holiday pay, employer National Insurance, employer pension contributions and our agency fee. ' +
-    'This is an estimate based on the rates you entered, not an invoice, and nothing is booked until we confirm.</p>'
-  );
+  const card = (title, inner) =>
+    '<tr><td style="padding:6px 18px">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ' + C.line + ';border-radius:12px"><tr>' +
+    '<td style="padding:14px 14px;' + FONT + 'color:' + C.ink + ';font-size:15px;line-height:1.5">' +
+    '<p style="margin:0 0 8px;font-size:12px;font-weight:bold;letter-spacing:1.5px;color:' + C.muted + '">' + title + '</p>' +
+    inner + '</td></tr></table></td></tr>';
+  const crow = (label, value, bold) =>
+    '<tr><td style="padding:5px 8px 5px 0;width:80px;vertical-align:top;font-size:13px;color:' + C.muted + '">' + label + '</td>' +
+    '<td style="padding:5px 0;font-size:15px' + (bold ? ';font-weight:bold' : '') + '">' + value + '</td></tr>';
+  const ctable = rows => '<table role="presentation" width="100%" cellpadding="0" cellspacing="0">' + rows + '</table>';
+
+  const clientDay = (s, i) => {
+    const worked = Number(s.hoursPerPerson || 0);
+    const chargeable = Number(s.chargeableHours || worked);
+    const overnight = s.finish <= s.start ? ' <span style="color:' + C.muted + ';font-size:13px">(finishes the next day)</span>' : '';
+    const brk = Number(s.breakMinutes) ? Number(s.breakMinutes) + ' minutes, unpaid' : 'No break';
+    const hoursText = hrs(chargeable) + ' per person' +
+      (chargeable > worked ? '<br><span style="font-size:13px;color:' + C.muted + '">' + hrs(worked) + ' worked, minimum charge applied</span>' : '');
+    const lines = s.lines.map(l =>
+      '<tr><td style="padding:8px 0;border-top:1px solid #eef0f3;vertical-align:top">' + esc(l.role) + ' &times; ' + Number(l.qty) +
+        '<br><span style="font-size:13px;color:' + C.muted + '">' + money(l.rate) + '/hr &times; ' + hrs(l.hours || chargeable) + ' hrs</span></td>' +
+      '<td style="padding:8px 0;border-top:1px solid #eef0f3;text-align:right;vertical-align:top;font-weight:bold">' + money(l.total) + '</td></tr>').join('');
+    const sub = multi
+      ? '<tr><td style="padding:8px 0 0;border-top:1px solid #eef0f3;color:' + C.muted + ';font-size:14px">Day ' + (i + 1) + ' total</td>' +
+        '<td style="padding:8px 0 0;border-top:1px solid #eef0f3;text-align:right;color:' + C.muted + ';font-size:14px">' +
+        money(Number(s.subtotal) || s.lines.reduce((a, l) => a + Number(l.total || 0), 0)) + '</td></tr>'
+      : '';
+    return card(multi ? 'DAY ' + (i + 1) + ' OF ' + shifts.length : 'YOUR SHIFT',
+      ctable(
+        crow('Date', esc(dateLong(s.date)), true) +
+        crow('Times', esc(s.start) + ' &ndash; ' + esc(s.finish) + overnight) +
+        crow('Break', brk) +
+        crow('Hours', hoursText)
+      ) +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px">' + lines + sub + '</table>');
+  };
+
+  const clientLocation = isNewLocation
+    ? '<p style="margin:0;font-weight:bold">' + esc(venue) + '</p>' +
+      (/^https?:\/\//i.test(address) ? '' : '<p style="margin:2px 0 0">' + esc(address) + '</p>') +
+      '<p style="margin:6px 0 0"><a href="' + esc(mapHref) + '" style="color:#1d4ed8;text-decoration:underline;font-weight:bold">Open in Google Maps &rarr;</a></p>'
+    : '<p style="margin:0">Your usual venue</p>';
+
+  const step = (n, text) =>
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 10px"><tr>' +
+    '<td style="width:34px;vertical-align:top"><div style="width:24px;height:24px;line-height:24px;border-radius:12px;background:' + C.dark +
+    ';color:' + C.gold + ';text-align:center;' + FONT + 'font-size:12px;font-weight:bold">' + n + '</div></td>' +
+    '<td style="vertical-align:top;font-size:14px;line-height:1.55;color:' + C.ink + ';padding-top:2px">' + text + '</td></tr></table>';
+
+  const totalBox =
+    '<tr><td style="padding:12px 18px 6px">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:2px solid ' + C.gold + ';border-radius:12px;background:#fffdf3"><tr>' +
+    '<td style="padding:16px 14px;' + FONT + 'color:' + C.ink + '">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>' +
+    '<td style="font-size:15px;font-weight:bold;vertical-align:bottom">Estimated total' +
+      '<br><span style="font-size:13px;font-weight:normal;color:' + C.muted + '">' + staffShifts + (staffShifts === 1 ? ' person' : ' staff') +
+      (multi ? ' across ' + shifts.length + ' days' : '') + '</span></td>' +
+    '<td style="text-align:right;font-size:24px;font-weight:bold;vertical-align:bottom">' + money(d.total) + '</td></tr></table>' +
+    (vatOn ? '<p style="margin:8px 0 0;font-size:13px;color:' + C.muted + '">Includes VAT at ' + Number(d.vatPct || 20) + '%: ' + money(d.vat) + ' (' + money(subtotal) + ' before VAT).</p>' : '') +
+    '</td></tr></table></td></tr>';
+
+  const clientHtml =
+    '<div style="background:#f5f6f8;padding:16px 0;' + FONT + '">' +
+    '<div style="display:none;max-height:0;overflow:hidden;opacity:0">We have your staff request. Nothing is booked until we confirm.</div>' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:580px;margin:0 auto;background:#ffffff;border:1px solid ' + C.line + ';border-radius:14px;overflow:hidden">' +
+    // header
+    '<tr><td style="background:' + C.dark + ';padding:22px 18px">' +
+    '<div style="' + FONT + 'font-size:18px;font-weight:bold;letter-spacing:4px;color:' + C.gold + '">GESTIOSTAFF</div>' +
+    '<div style="' + FONT + 'font-size:12px;color:#9aa1ab;letter-spacing:1px;margin-top:4px">Hospitality and events staff, London</div></td></tr>' +
+    // intro
+    '<tr><td style="padding:24px 18px 8px;' + FONT + 'color:' + C.ink + ';font-size:15px;line-height:1.6">' +
+    '<p style="margin:0 0 6px;font-size:12px;font-weight:bold;letter-spacing:1.5px;color:' + C.goldTxt + '">REQUEST RECEIVED</p>' +
+    '<h1 style="margin:0 0 10px;font-size:24px;line-height:1.25;color:' + C.ink + '">Thanks, ' + esc(firstName) + '</h1>' +
+    '<p style="margin:0 0 6px">We&#39;ve received your staff request for <strong>' + esc(d.company) + '</strong>' +
+    (multi ? ', covering ' + shifts.length + ' days' : '') + '. Here&#39;s a summary of what you asked for.</p>' +
+    '</td></tr>' +
+    card('LOCATION', clientLocation) +
+    shifts.map(clientDay).join('') +
+    (notes ? card('YOUR NOTES', '<p style="margin:0;font-size:15px;line-height:1.55">' + notesHtml + '</p>') : '') +
+    totalBox +
+    card('WHAT HAPPENS NEXT',
+      step(1, 'We&#39;ll confirm your staff by email as soon as possible. Nothing is booked until then.') +
+      step(2, 'Before the event, we&#39;ll send you the crew list with names and photos.') +
+      step(3, 'Need to change something? Just reply to this email.')) +
+    // phone
+    '<tr><td style="padding:12px 18px 6px">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f8;border-radius:12px"><tr>' +
+    '<td style="padding:14px 14px;' + FONT + 'font-size:14px;line-height:1.55;color:' + C.ink + '">' +
+    '<strong>Last-minute changes or questions?</strong><br>Call Mihai on <a href="' + TEL + '" style="color:' + C.ink + ';font-weight:bold;text-decoration:underline">' + PHONE + '</a>.' +
+    '</td></tr></table></td></tr>' +
+    // sign-off and small print
+    '<tr><td style="padding:18px 18px 20px;' + FONT + 'color:' + C.ink + ';font-size:15px;line-height:1.6">' +
+    '<p style="margin:0 0 16px">Kind regards,<br><strong>GestioStaff Team</strong></p>' +
+    '<p style="margin:0;font-size:12px;line-height:1.55;color:' + C.muted + '">This is an estimate based on the rate you entered, not an invoice. ' +
+    'Your rate covers the staff member&#39;s pay and holiday pay, employer National Insurance and pension, and our fee.</p>' +
+    '</td></tr>' +
+    // footer
+    '<tr><td style="background:#f9fafb;border-top:1px solid ' + C.line + ';padding:16px 18px;' + FONT + 'font-size:12px;line-height:1.7;color:' + C.muted + '">' +
+    '<strong style="color:' + C.ink + '">GestioStaff Limited</strong><br>' +
+    '<a href="mailto:info@gestiostaff.com" style="color:' + C.muted + '">info@gestiostaff.com</a> &middot; ' +
+    '<a href="' + TEL + '" style="color:' + C.muted + '">' + PHONE + '</a> &middot; ' +
+    '<a href="https://www.gestiostaff.com" style="color:' + C.muted + '">www.gestiostaff.com</a></td></tr>' +
+    '</table></div>';
 
   // --- Your copy ---
   const nmwFlag = d.belowNMW
@@ -213,10 +298,14 @@ export default async function handler(req, res) {
     '</tr>';
 
   // Links to open each day on the New booking page (when the request page saved it)
+  const requestKey = /^[A-Za-z0-9-]{16,64}$/.test(String(d.requestKey || '')) ? String(d.requestKey) : '';
   const requestIds = Array.isArray(d.requestIds) && d.requestIds.length === shifts.length &&
     d.requestIds.every(id => /^rec[A-Za-z0-9]{14}$/.test(String(id))) ? d.requestIds.map(String) : null;
-  const openUrl = i => 'https://crew.gestiostaff.com/new-booking?request=' + requestIds[i];
-  const openButton = (i, label) => requestIds
+  const canOpen = !!(requestKey || requestIds);
+  const openUrl = i => requestKey
+    ? 'https://crew.gestiostaff.com/new-booking?key=' + requestKey + '&day=' + (i + 1)
+    : 'https://crew.gestiostaff.com/new-booking?request=' + requestIds[i];
+  const openButton = (i, label) => canOpen
     ? '<p style="margin:14px 0 4px"><a href="' + openUrl(i) + '" style="display:inline-block;background:#0c0d10;color:#ffffff;text-decoration:none;font-weight:bold;padding:12px 18px;border-radius:10px">' + label + '</a></p>'
     : '';
 
@@ -244,7 +333,7 @@ export default async function handler(req, res) {
     '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:18px 0">' +
       totalsBlock(3) +
     '</table>' +
-    (requestIds ? '<p style="font-size:13px;color:#6b7585;margin-top:20px">The button opens crew.gestiostaff.com/new-booking with this request filled in, including the venue. Check it, add the uniform and duties, then create the booking. It\'s also listed there under Client requests waiting.</p>' : '') +
+    (canOpen ? '<p style="font-size:13px;color:#6b7585;margin-top:20px">The button opens crew.gestiostaff.com/new-booking with this request filled in, including the venue. Check it, add the uniform and duties, then create the booking. It\'s also listed there under Client requests waiting.</p>' : '') +
     '<p style="font-size:13px;color:#6b7585;margin-top:20px">Reply to this email to reach ' + esc(d.contact) + ' directly.</p>'
   );
 
