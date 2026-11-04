@@ -64,6 +64,11 @@ export default async function handler(req, res) {
   const venue = isNewLocation ? String(loc.venue || '').trim() : '';
   const address = isNewLocation ? String(loc.address || '').trim() : '';
   if (isNewLocation && (!venue || venue.length > 100 || address.length < 5 || address.length > 300)) bad.push('location');
+  // Optional notes from the client (line breaks kept)
+  if (d.notes != null && (typeof d.notes !== 'string' || d.notes.length > 1000)) bad.push('notes');
+  const notes = typeof d.notes === 'string'
+    ? d.notes.replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
+    : '';
   if (bad.length) return res.status(400).json({ error: 'Invalid request', fields: bad });
 
   // --- Formatting ---
@@ -99,6 +104,7 @@ export default async function handler(req, res) {
     ? '<strong>' + esc(venue) + '</strong><br>' + (/^https?:\/\//i.test(address) ? '' : esc(address) + '<br>') +
       '<a href="' + esc(mapHref) + '">Open in Google Maps</a>'
     : 'Your usual venue';
+  const notesHtml = notes ? esc(notes).replace(/\n/g, '<br>') : '';
   const locationHtmlInternal = isNewLocation ? locationHtml : 'Their usual venue <span style="color:#6b7585">(filled in from their last booking on the New booking page)</span>';
 
   const dayDetails = s => {
@@ -178,7 +184,8 @@ export default async function handler(req, res) {
     '<p>Hi ' + esc(d.contact) + ',</p>' +
     '<p>Thank you — we have your staffing request for ' + esc(d.company) +
     (multi ? ' covering ' + shifts.length + ' days' : '') + '. Here is what you have asked for:</p>' +
-    '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:12px 0">' + row('Location', locationHtml) + '</table>' +
+    '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:12px 0">' + row('Location', locationHtml) +
+      (notes ? row('Your notes', notesHtml) : '') + '</table>' +
     clientDays +
     '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:18px 0">' +
       totalsBlock(2) +
@@ -231,6 +238,7 @@ export default async function handler(req, res) {
       row('Contact', esc(d.contact)) +
       row('Email', '<a href="mailto:' + esc(d.email) + '">' + esc(d.email) + '</a>') +
       row('Location', locationHtmlInternal) +
+      (notes ? row('Notes', '<span style="display:inline-block;background:#fff8db;border-radius:6px;padding:6px 10px">' + notesHtml + '</span>') : '') +
     '</table>' +
     internalDays +
     '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:18px 0">' +
