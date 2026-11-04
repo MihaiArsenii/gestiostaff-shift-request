@@ -58,6 +58,12 @@ export default async function handler(req, res) {
     else if (s.lines.some(l => !l || !l.role || String(l.role).length > 60 || !(Number(l.qty) >= 1))) bad.push('lines ' + (i + 1));
   });
   if (!(Number(d.total) > 0)) bad.push('total');
+  // Where the event is: usual venue (older pages send nothing) or a new location
+  const loc = d.location && typeof d.location === 'object' ? d.location : {};
+  const isNewLocation = loc.type === 'new';
+  const venue = isNewLocation ? String(loc.venue || '').trim() : '';
+  const address = isNewLocation ? String(loc.address || '').trim() : '';
+  if (isNewLocation && (!venue || venue.length > 100 || address.length < 5 || address.length > 300)) bad.push('location');
   if (bad.length) return res.status(400).json({ error: 'Invalid request', fields: bad });
 
   // --- Formatting ---
@@ -85,6 +91,15 @@ export default async function handler(req, res) {
   const row = (label, value) =>
     '<tr><td style="padding:7px 0;color:#6b7585;width:40%">' + label + '</td>' +
     '<td style="padding:7px 0;color:#1a1d21">' + value + '</td></tr>';
+
+  // A map link the client pasted stays clickable; an address gets a Google Maps search link
+  const mapHref = /^https?:\/\//i.test(address) ? address
+    : 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(address);
+  const locationHtml = isNewLocation
+    ? '<strong>' + esc(venue) + '</strong><br>' + (/^https?:\/\//i.test(address) ? '' : esc(address) + '<br>') +
+      '<a href="' + esc(mapHref) + '">Open in Google Maps</a>'
+    : 'Your usual venue';
+  const locationHtmlInternal = isNewLocation ? locationHtml : 'Their usual venue <span style="color:#6b7585">(filled in from their last booking on the New booking page)</span>';
 
   const dayDetails = s => {
     const worked = Number(s.hoursPerPerson || 0);
@@ -163,6 +178,7 @@ export default async function handler(req, res) {
     '<p>Hi ' + esc(d.contact) + ',</p>' +
     '<p>Thank you — we have your staffing request for ' + esc(d.company) +
     (multi ? ' covering ' + shifts.length + ' days' : '') + '. Here is what you have asked for:</p>' +
+    '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:12px 0">' + row('Location', locationHtml) + '</table>' +
     clientDays +
     '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:18px 0">' +
       totalsBlock(2) +
@@ -214,12 +230,13 @@ export default async function handler(req, res) {
       row('Company', esc(d.company)) +
       row('Contact', esc(d.contact)) +
       row('Email', '<a href="mailto:' + esc(d.email) + '">' + esc(d.email) + '</a>') +
+      row('Location', locationHtmlInternal) +
     '</table>' +
     internalDays +
     '<table style="width:100%;border-collapse:collapse;font-size:15px;margin:18px 0">' +
       totalsBlock(3) +
     '</table>' +
-    (requestIds ? '<p style="font-size:13px;color:#6b7585;margin-top:20px">The button opens crew.gestiostaff.com/new-booking with this request filled in. Add the venue, uniform and duties, then create the booking. It\'s also listed there under Client requests waiting.</p>' : '') +
+    (requestIds ? '<p style="font-size:13px;color:#6b7585;margin-top:20px">The button opens crew.gestiostaff.com/new-booking with this request filled in, including the venue. Check it, add the uniform and duties, then create the booking. It\'s also listed there under Client requests waiting.</p>' : '') +
     '<p style="font-size:13px;color:#6b7585;margin-top:20px">Reply to this email to reach ' + esc(d.contact) + ' directly.</p>'
   );
 
